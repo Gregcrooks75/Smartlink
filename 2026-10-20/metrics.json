@@ -1,0 +1,42 @@
+{
+  "train": {
+    "meters": 49495,
+    "candidate_rows": 401806,
+    "top1_accuracy": 0.9924436811799172,
+    "top3_recall": 0.9998585715728862,
+    "mrr": 0.996108024379567,
+    "ndcg_at_3": 0.9970611139555224,
+    "nearest_baseline_accuracy": 0.5858975654106475,
+    "current_assignment_coverage": 1.0,
+    "current_baseline_accuracy_known": 0.9094858066471361,
+    "currently_incorrect_meters": 4480,
+    "top1_on_currently_incorrect": 0.9381696428571429,
+    "unassigned_meters": 0,
+    "top1_on_unassigned": null,
+    "proposed_changes": 4351,
+    "proposed_change_precision": 0.9659848310733165,
+    "correct_assignments_wrongly_changed": 97,
+    "wrong_change_rate_on_correct_assignments": 0.002154837276463401,
+    "top_score_ties": 0
+  },
+  "validation": {
+    "meters": 10503,
+    "candidate_rows": 84240,
+    "top1_accuracy": 0.9767685423212416,
+    "top3_recall": 0.999904789107874,
+    "mrr": 0.9881224412072741,
+    "ndcg_at_3": 0.9911788997252493,
+    "nearest_baseline_accuracy": 0.5896410549366847,
+    "current_assignment_coverage": 1.0,
+    "current_baseline_accuracy_known": 0.9151670951156813,
+    "currently_incorrect_meters": 891,
+    "top1_on_currently_incorrect": 0.8226711560044894,
+    "unassigned_meters": 0,
+    "top1_on_unassigned": null,
+    "proposed_changes": 839,
+    "proposed_change_precision": 0.8736591179976162,
+    "correct_assignments_wrongly_changed": 86,
+    "wrong_change_rate_on_correct_assignments": 0.0089471493965876,
+    "top_score_ties": 0
+  }
+}

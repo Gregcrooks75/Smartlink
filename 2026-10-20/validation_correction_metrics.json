@@ -1,0 +1,10 @@
+{
+  "split": "validation",
+  "min_score_gap": 1.6888329982757568,
+  "proposed_changes": 596,
+  "correct_changes": 567,
+  "incorrect_changes": 29,
+  "precision": 0.9513422818791947,
+  "incorrect_meters_recovered": 0.6363636363636364,
+  "correctly_assigned_meters_wrongly_changed": 23
+}
