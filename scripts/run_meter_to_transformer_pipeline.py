@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import date
 
 import geopandas as gpd
 import pandas as pd
 import polars as pl
+
+
 # ======================================================
 # INGESTION
 # ======================================================
@@ -33,7 +36,10 @@ from mtx.ingestion.adam_cache import (
 # ======================================================
 # HISTORY
 # ======================================================
-from meter_to_transformer.stages.run_historical_corrections import run_historical_corrections
+
+from meter_to_transformer.stages.run_historical_corrections import (
+    run_historical_corrections,
+)
 
 from mtx.history.adam_history import (
     track_adam_history,
@@ -112,16 +118,50 @@ from meter_to_transformer.stages.run_final_features import (
     run_final_feature_stage,
 )
 
-from mtx.db.db_AMI import load_historical_ami, get_ny_ami_data
+
+# ======================================================
+# DATABASE
+# ======================================================
+
+from mtx.db.db_AMI import (
+    load_historical_ami,
+    get_ny_ami_data,
+)
+
+
+# ======================================================
+# TRAINING
+# ======================================================
+
 from meter_to_transformer.training.run_training_data import (
     run_training_data_stage,
 )
+
 from meter_to_transformer.training.run_model_training import (
     run_model_training_stage,
 )
 
 
+# ======================================================
+# MODEL REVIEW
+# ======================================================
 
+from run_correction_review import (
+    review_corrections,
+)
+
+from run_group_review import (
+    run_group_review,
+)
+# ======================================================
+# PREDICTIONS
+# ======================================================
+
+
+from meter_to_transformer.prediction.run_recommendations import (
+run_recommendations_stage,
+import_review_updates,
+)
 
 
 # ======================================================
@@ -133,9 +173,13 @@ PROJECT_ROOT = Path(
     r"\Documents - Asset Data Strategy"
     r"\Asset Data Quality\SmartLink"
 )
-from datetime import date
 
 run_date = date.today()
+
+
+# ======================================================
+# CONFIGURATION
+# ======================================================
 
 CONFIG = RunConfig(
     week_start="2026-02-02",
@@ -194,13 +238,13 @@ ITRON_REQUIRED_COLUMNS = (
 # ======================================================
 
 def main():
-    
+
     print("\n" + "=" * 80)
     print("SMARTLINK METER-TO-TRANSFORMER PIPELINE")
     print("=" * 80)
 
     # ==================================================
-    # 1. LOAD DATA
+    # 1. LOAD INPUT DATA
     # ==================================================
 
     print("\n1. Loading Inputs...")
@@ -223,6 +267,13 @@ def main():
     adam_df = load_or_refresh_adam_data(
         force_refresh=False,
     )
+
+    
+    full_ami_df = ami_df.copy()
+
+    # ==================================================
+    # 2. LOAD DIVISION POLYGONS
+    # ==================================================
 
     print("\n2. Loading Division Polygons...")
 
@@ -263,8 +314,9 @@ def main():
         epsg=4326
     )
 
+
     # ==================================================
-    # STANDARDIZING DATA COLUMNS
+    # 3. STANDARDIZE INPUT DATA
     # ==================================================
 
     print("\n3. Standardizing Inputs...")
@@ -283,21 +335,27 @@ def main():
         adam_df=adam_df,
     )
 
-    """
+    # After standardize_all_inputs(), before coordinate validation:
+    full_transformer_df = transformer_df.copy()
+    
+  
+    
     # ==================================================
-    # HISTORICAL CORRECTIONS
+    # 4. RECONCILE HISTORICAL RECOMMENDATIONS
     # ==================================================
 
-    print("\nReconciling Historical Recommendations...")
+    print("\n4. Reconciling Historical Recommendations...")
 
     historical_corrections_df = run_historical_corrections(
-    ami_df=ami_df
+        ami_df=ami_df
     )
+
+
     # ==================================================
-    # 4. TRACK HISTORY
+    # 5. TRACK INPUT HISTORY
     # ==================================================
 
-    print("\n Tracking History...")
+    print("\n5. Tracking History...")
 
     ami_changes = track_ami_history(
         current_df=ami_df,
@@ -335,8 +393,9 @@ def main():
         f"{len(transformer_changes):,}"
     )
 
+
     # ==================================================
-    # 5. VALIDATE COORDINATES
+    # 6. VALIDATE COORDINATES
     # ==================================================
 
     print("\n6. Validating Coordinates...")
@@ -365,6 +424,7 @@ def main():
         f"{len(invalid_meters):,}"
     )
 
+
     # ==================================================
     # 7. SAVE REJECTION LOG
     # ==================================================
@@ -378,9 +438,9 @@ def main():
         invalid_transformers=invalid_transformers,
     )
 
+
     # ==================================================
-    # 8. EXTRA STEP TO MAKE SURE WE DO NOT HAVE
-    #    REJECTED METERS OR STRUCTURES ANYWHERE
+    # 8. REMOVE REJECTED METERS AND TRANSFORMERS
     # ==================================================
 
     meters_to_omit = (
@@ -426,16 +486,19 @@ def main():
     )
 
     adam_df = adam_df[
-        ~adam_df["meter_number"].isin(meters_to_omit)
+        ~adam_df["meter_number"].isin(
+            meters_to_omit
+        )
     ].reset_index(
         drop=True
     )
 
+
     # ==================================================
-    # 8. GROUP ASSIGNMENTS
+    # 9. BUILD METER GROUPS
     # ==================================================
 
-    print("\n8. Building Meter Groups...")
+    print("\n9. Building Meter Groups...")
 
     group_files = run_meter_grouping_stage(
         ami_df=ami_df,
@@ -452,7 +515,12 @@ def main():
         f"{len(grouping_changes):,}"
     )
 
-    print("\n9. Building Transformer Candidates...")
+
+    # ==================================================
+    # 10. BUILD TRANSFORMER CANDIDATES
+    # ==================================================
+
+    print("\n10. Building Transformer Candidates...")
 
     candidate_outputs = run_transformer_candidate_stage(
         config=CONFIG,
@@ -464,8 +532,13 @@ def main():
 
     # track_candidate_history()
 
+
+    # ==================================================
+    # 11. BUILD CANDIDATE FEATURES
+    # ==================================================
+
     print(
-        "\n10. Building Candidate Features..."
+        "\n11. Building Candidate Features..."
     )
 
     from datetime import date
@@ -498,8 +571,13 @@ def main():
         f"{len(candidate_feature_changes):,}"
     )
 
+
+    # ==================================================
+    # 12. BUILD TILE FEATURES
+    # ==================================================
+
     print(
-        "\n11. Building Tile Features..."
+        "\n12. Building Tile Features..."
     )
 
     TILE_CONFIG = TileFeatureConfig(
@@ -512,21 +590,53 @@ def main():
         delete_work_files_on_success=False,
     )
 
-    tile_feature_outputs = run_tile_feature_stage(
-        config=CONFIG,
-        candidate_feature_files=(
-            candidate_feature_outputs
-        ),
-        candidate_feature_changes=(
-            candidate_feature_changes
-        ),
-        tile_config=TILE_CONFIG,
-    )
-    
-    print(
-    "\n12. Assembling Final Feature Sets..."
-    )
+    SKIP_TILE_FEATURES = True  # False to run tile processing normally
 
+    if SKIP_TILE_FEATURES:
+        tile_feature_outputs = {
+            division: (
+                PROJECT_ROOT
+                / "data"
+                / "cache"
+                / "tile_features"
+                / "current"
+                / f"{division}.parquet"
+            )
+            for division in candidate_feature_outputs
+        }
+
+        for path in tile_feature_outputs.values():
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"Missing tile cache: {path}"
+                )
+
+        print(
+            "Skipping tile processing; "
+            "using existing tile files."
+        )
+
+    else:
+        tile_feature_outputs = run_tile_feature_stage(
+            config=CONFIG,
+            candidate_feature_files=(
+                candidate_feature_outputs
+            ),
+            candidate_feature_changes=(
+                candidate_feature_changes
+            ),
+            tile_config=TILE_CONFIG,
+        )
+
+
+    # ==================================================
+    # 13. ASSEMBLE FINAL FEATURE SETS
+    # ==================================================
+
+    print(
+        "\n13. Assembling Final Feature Sets..."
+    )
+   
     final_feature_outputs = (
         run_final_feature_stage(
             candidate_feature_files=(
@@ -538,41 +648,92 @@ def main():
             snapshot_date=run_date,
         )
     )
-    """
+
+  
+   
 
     # ==================================================
-    # 13. BUILD TRAINING DATA
+    # 14. BUILD TRAINING DATA
     # ==================================================
 
-    print("\n13. Building Training Data...")
+    print("\n14. Building Training Data...")
 
     training_directory = run_training_data_stage(
         project_root=PROJECT_ROOT,
         run_date=run_date.isoformat(),
         adam_labels=pl.from_pandas(adam_df),
-        current_ami=pl.from_pandas(ami_df),
+        current_ami=pl.DataFrame(ami_df[["meter_number", "current_meter_floc"]].to_dict(orient="list"), infer_schema_length=None,),
         ami_meter_col="meter_number",
         ami_transformer_col="current_meter_floc",
         subgroup_col="tx_group_id",
         quality_col="tx_current_transformer_count",
     )
 
-    print(f"Training data saved to: {training_directory}")
-    
-    
-    print("\n14. Training Transformer Ranker...")
+    print(
+        f"Training data saved to: "
+        f"{training_directory}"
+    )
+
+
+    # ==================================================
+    # 15. TRAIN TRANSFORMER RANKER
+    # ==================================================
+
+    print("\n15. Training Transformer Ranker...")
 
     model_directory = run_model_training_stage(
         project_root=PROJECT_ROOT,
         training_directory=training_directory,
+        exclude_features=(),
         evaluate_test=False,
     )
 
-    print(f"Model saved to: {model_directory}")
-    # ======================================================
+
+    # ==================================================
+    # 16. REVIEW MODEL CORRECTIONS
+    # ==================================================
+
+    print("\n16. Reviewing Model Corrections...")
+
+    review_corrections(
+        model_directory,
+        training_directory,
+        target_precision=0.95,
+        min_changes=100,
+    )
+
+
+    # ==================================================
+    # 17. RUN GROUP REVIEW
+    # ==================================================
+
+    print("\n17. Run Group Review...")
+
+    group_review_file = run_group_review(
+        model_directory
+    )
+
+    # ==================================================
+    # 18. RUN PREDICTIONS
+    # ==================================================
+
+    print("\n18. Run Predictions...")
+
     
-    # ENTRY POINT
-    # ======================================================
+
+    recommendation_directory = run_recommendations_stage(
+        project_root=PROJECT_ROOT,
+        model_date="2026-10-22",      # Choose your saved model
+        min_score_gap=0.004216045,    # Bottom threshold in your screenshot
+        ami_df=ami_df,
+        full_ami_df=full_ami_df,
+        transformer_df=full_transformer_df,
+        final_feature_files=final_feature_outputs,
+    )
+
+# ======================================================
+# ENTRY POINT
+# ======================================================
 
 if __name__ == "__main__":
     main()
