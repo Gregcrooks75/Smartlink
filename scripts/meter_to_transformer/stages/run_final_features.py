@@ -151,6 +151,9 @@ def run_final_feature_stage(
     Final files are written to:
 
         data/cache/final_features/YYYY-MM-DD/
+
+    If a final feature file already exists for a division,
+    the existing cached file is reused.
     """
 
     if snapshot_date is None:
@@ -221,6 +224,41 @@ def run_final_feature_stage(
         print(
             "\n"
             f"[{division}] "
+            "Checking final features..."
+        )
+
+        # --------------------------------------------------
+        # Define output path before processing
+        # --------------------------------------------------
+
+        output_path = (
+            output_dir
+            / f"{division}.parquet"
+        )
+
+        # --------------------------------------------------
+        # Reuse existing final feature file
+        # --------------------------------------------------
+
+        if output_path.exists():
+            print(
+                f"[{division}] "
+                "Final features already exist. "
+                "Reusing cached file."
+            )
+
+            print(
+                f"[{division}] "
+                f"Cached file: {output_path}"
+            )
+
+            outputs[division] = output_path
+
+            continue
+
+        print(
+            f"[{division}] "
+            "No cached final feature file found. "
             "Assembling final features..."
         )
 
@@ -340,7 +378,7 @@ def run_final_feature_stage(
         )
 
         # ==================================================
-        # VERIFY EXACT SAME METER -> TRANSFORMER PAIRS
+        # VERIFY EXACT SAME METER-TRANSFORMER PAIRS
         # ==================================================
 
         candidate_only = (
@@ -434,11 +472,6 @@ def run_final_feature_stage(
         # ==================================================
         # SAVE FINAL FEATURE SET
         # ==================================================
-
-        output_path = (
-            output_dir
-            / f"{division}.parquet"
-        )
 
         final_df.to_parquet(
             output_path,
