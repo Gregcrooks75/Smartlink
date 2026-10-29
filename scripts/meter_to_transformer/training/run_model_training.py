@@ -57,12 +57,17 @@ REQUIRED = {
 }
 
 
-def validatesplit(frame, name, max_subgroup_transformers):
+def validate_split(
+    frame,
+    name,
+    max_subgroup_transformers,
+):
     missing = REQUIRED - set(frame.columns)
 
     if missing or frame.empty:
         raise ValueError(
-            f"{name}: empty dataset or missing columns {sorted(missing)}"
+            f"{name}: empty dataset or missing columns "
+            f"{sorted(missing)}"
         )
 
     keys = [
@@ -73,30 +78,53 @@ def validatesplit(frame, name, max_subgroup_transformers):
     ]
 
     if frame[keys].isna().any().any():
-        raise ValueError(f"{name}: null identifiers")
+        raise ValueError(
+            f"{name}: null identifiers"
+        )
 
-    if frame.duplicated(["meter_number", "candidate_transformer"]).any():
-        raise ValueError(f"{name}: duplicate meter/candidate pairs")
+    duplicate_pairs = frame.duplicated(
+        [
+            "meter_number",
+            "candidate_transformer",
+        ]
+    )
+
+    if duplicate_pairs.any():
+        raise ValueError(
+            f"{name}: duplicate meter/candidate pairs"
+        )
 
     if not frame["y"].isin([0, 1]).all():
-        raise ValueError(f"{name}: y must contain only 0 and 1")
+        raise ValueError(
+            f"{name}: y must contain only 0 and 1"
+        )
 
-    groups = frame.groupby("qid", sort=False)
+    groups = frame.groupby(
+        "qid",
+        sort=False,
+    )
 
     if (
-        (groups["meter_number"].nunique() != 1).any()
-        or (groups["y"].sum() != 1).any()
-        or (groups.size() < 2).any()
-        or (frame.groupby("meter_number")["qid"].nunique() != 1).any()
+        groups["meter_number"].nunique().ne(1).any()
+        or groups["y"].sum().ne(1).any()
+        or groups.size().lt(2).any()
+        or frame.groupby("meter_number")["qid"].nunique().ne(1).any()
     ):
         raise ValueError(
             f"{name}: each qid must identify one meter with "
             ">=2 candidates and one positive"
         )
 
-    if groups["current_transformer"].nunique(dropna=False).gt(1).any():
+    inconsistent_current_transformers = (
+        groups["current_transformer"]
+        .nunique(dropna=False)
+        .gt(1)
+    )
+
+    if inconsistent_current_transformers.any():
         raise ValueError(
-            f"{name}: inconsistent current assignments within a meter"
+            f"{name}: inconsistent current assignments "
+            "within a meter"
         )
 
     quality = pd.to_numeric(
@@ -104,13 +132,19 @@ def validatesplit(frame, name, max_subgroup_transformers):
         errors="raise",
     )
 
-    if (
-        (frame["subgroup_id"].notna() & quality.isna())
+    invalid_quality = (
+        (
+            frame["subgroup_id"].notna()
+            & quality.isna()
+        )
         | quality.lt(0)
         | quality.gt(max_subgroup_transformers)
-    ).any():
+    )
+
+    if invalid_quality.any():
         raise ValueError(
-            f"{name}: invalid subgroup quality or transformer limit exceeded"
+            f"{name}: invalid subgroup quality or "
+            "transformer limit exceeded"
         )
 
     distances = frame["distance_ft"].to_numpy(
@@ -118,24 +152,36 @@ def validatesplit(frame, name, max_subgroup_transformers):
         na_value=np.nan,
     )
 
-    if not np.isfinite(distances).all() or (distances < 0).any():
+    if (
+        not np.isfinite(distances).all()
+        or (distances < 0).any()
+    ):
         raise ValueError(
             f"{name}: distance_ft must be finite and nonnegative"
         )
 
-    return frame.sort_values(
-        ["qid", "candidate_transformer"],
-        kind="stable",
-    ).reset_index(drop=True)
+    return (
+        frame.sort_values(
+            [
+                "qid",
+                "candidate_transformer",
+            ],
+            kind="stable",
+        )
+        .reset_index(drop=True)
+    )
 
 
-def checkoverlap(frames):
+def check_overlap(frames):
     identities = {}
 
     for name, frame in frames.items():
         subgroups = frame.loc[
             frame["subgroup_id"].notna(),
-            ["division", "subgroup_id"],
+            [
+                "division",
+                "subgroup_id",
+            ],
         ]
 
         identities[name] = {
@@ -143,22 +189,32 @@ def checkoverlap(frames):
             "components": set(frame["split_component"]),
             "verified_transformers": set(
                 frame.loc[
-                    frame["y"] == 1,
+                    frame["y"].eq(1),
                     "candidate_transformer",
                 ]
             ),
             "subgroups": set(
-                subgroups.itertuples(index=False, name=None)
+                subgroups.itertuples(
+                    index=False,
+                    name=None,
+                )
             ),
         }
 
-    for a, b in combinations(identities, 2):
-        for key in identities[a]:
-            overlap = identities[a][key] & identities[b][key]
+    for first_name, second_name in combinations(
+        identities,
+        2,
+    ):
+        for key in identities[first_name]:
+            overlap = (
+                identities[first_name][key]
+                & identities[second_name][key]
+            )
 
             if overlap:
                 raise ValueError(
-                    f"{a}/{b}: {len(overlap):,} overlapping {key}; "
+                    f"{first_name}/{second_name}: "
+                    f"{len(overlap):,} overlapping {key}; "
                     "rebuild the splits"
                 )
 
@@ -171,50 +227,69 @@ def checkoverlap(frames):
     }
 
 
-def featureschema(train, exclude_features):
+def feature_schema(
+    train,
+    exclude_features,
+):
     excluded = ID_AND_LABEL_COLUMNS | {
-        c.lower() for c in exclude_features
+        column.lower()
+        for column in exclude_features
     }
 
     features = [
-        c
-        for c in train.columns
-        if c.lower() not in excluded
-        and not c.lower().endswith(("_id", "_floc", "_number"))
-        and not c.lower().startswith(
-            ("truth_", "verified_", "label_", "validation_")
+        column
+        for column in train.columns
+        if column.lower() not in excluded
+        and not column.lower().endswith(
+            (
+                "_id",
+                "_floc",
+                "_number",
+            )
+        )
+        and not column.lower().startswith(
+            (
+                "truth_",
+                "verified_",
+                "label_",
+                "validation_",
+            )
         )
     ]
 
     if not features:
-        raise ValueError("No model features remain after filtering")
+        raise ValueError(
+            "No model features remain after filtering"
+        )
 
     numeric = [
-        c
-        for c in features
-        if is_numeric_dtype(train[c])
+        column
+        for column in features
+        if is_numeric_dtype(train[column])
     ]
 
     categories = {
-        c: sorted(
-            train[c]
+        column: sorted(
+            train[column]
             .astype("string")
             .fillna("__MISSING__")
             .unique()
             .tolist()
         )
-        for c in features
-        if c not in numeric
+        for column in features
+        if column not in numeric
     }
 
     encoded = numeric + [
-        f"{c}__cat_{i}"
-        for c, levels in categories.items()
-        for i in range(len(levels))
+        f"{column}__cat_{index}"
+        for column, levels in categories.items()
+        for index in range(len(levels))
     ]
 
     if len(encoded) != len(set(encoded)):
-        raise ValueError("Encoded feature names collide")
+        raise ValueError(
+            "Encoded feature names collide"
+        )
 
     return {
         "source_features": features,
@@ -222,15 +297,21 @@ def featureschema(train, exclude_features):
         "categories": categories,
         "encoded_features": encoded,
         "excluded_columns": [
-            c
-            for c in train.columns
-            if c not in features
+            column
+            for column in train.columns
+            if column not in features
         ],
     }
 
 
-def _encode(frame, schema):
-    missing = set(schema["source_features"]) - set(frame.columns)
+def _encode(
+    frame,
+    schema,
+):
+    missing = (
+        set(schema["source_features"])
+        - set(frame.columns)
+    )
 
     if missing:
         raise ValueError(
@@ -239,9 +320,9 @@ def _encode(frame, schema):
 
     columns = {}
 
-    for c in schema["numeric"]:
+    for column in schema["numeric"]:
         values = pd.to_numeric(
-            frame[c],
+            frame[column],
             errors="raise",
         ).to_numpy(
             dtype=np.float32,
@@ -250,30 +331,41 @@ def _encode(frame, schema):
         )
 
         values[~np.isfinite(values)] = np.nan
-        columns[c] = values
+        columns[column] = values
 
-    for c, levels in schema["categories"].items():
+    for column, levels in schema["categories"].items():
         values = (
-            frame[c]
+            frame[column]
             .astype("string")
             .fillna("__MISSING__")
         )
 
-        for i, level in enumerate(levels):
-            columns[f"{c}__cat_{i}"] = values.eq(level).to_numpy(
-                dtype=np.float32
+        for index, level in enumerate(levels):
+            encoded_column = f"{column}__cat_{index}"
+
+            columns[encoded_column] = (
+                values.eq(level).to_numpy(
+                    dtype=np.float32
+                )
             )
 
-    return pd.DataFrame(
+    encoded_frame = pd.DataFrame(
         columns,
         index=frame.index,
-    )[schema["encoded_features"]]
+    )
+
+    return encoded_frame[
+        schema["encoded_features"]
+    ]
 
 
-def rankcandidates(frame, scores):
+def rank_candidates(
+    frame,
+    scores,
+):
     columns = [
-        c
-        for c in [
+        column
+        for column in [
             "meter_number",
             "candidate_transformer",
             "current_transformer",
@@ -283,14 +375,16 @@ def rankcandidates(frame, scores):
             "distance_ft",
             "y",
         ]
-        if c in frame
+        if column in frame
     ]
 
     ranked = frame[columns].copy()
     ranked["rank_score"] = np.asarray(scores)
 
     if not np.isfinite(ranked["rank_score"]).all():
-        raise ValueError("The model returned non-finite scores")
+        raise ValueError(
+            "The model returned non-finite scores"
+        )
 
     ranked = ranked.sort_values(
         [
@@ -299,39 +393,58 @@ def rankcandidates(frame, scores):
             "distance_ft",
             "candidate_transformer",
         ],
-        ascending=[True, False, True, True],
+        ascending=[
+            True,
+            False,
+            True,
+            True,
+        ],
         kind="stable",
     )
 
     ranked["rank"] = (
-        ranked.groupby("meter_number", sort=False).cumcount() + 1
+        ranked.groupby(
+            "meter_number",
+            sort=False,
+        )
+        .cumcount()
+        .add(1)
     )
 
     top = (
-        ranked.loc[ranked["rank"] == 1]
+        ranked.loc[
+            ranked["rank"].eq(1)
+        ]
         .copy()
         .set_index("meter_number")
     )
 
-    top = top.rename(
-        columns={
-            "candidate_transformer": "recommended_transformer",
-            "distance_ft": "recommended_distance_ft",
-        }
-    ).drop(
-        columns=[
-            c
-            for c in ["y", "rank"]
-            if c in top
-        ]
+    top = (
+        top.rename(
+            columns={
+                "candidate_transformer": "recommended_transformer",
+                "distance_ft": "recommended_distance_ft",
+            }
+        )
+        .drop(
+            columns=[
+                column
+                for column in ["y", "rank"]
+                if column in top
+            ]
+        )
     )
-
     second = (
-        ranked.loc[ranked["rank"] == 2]
+        ranked.loc[
+            ranked["rank"].eq(2)
+        ]
         .set_index("meter_number")
     )
 
-    top["second_transformer"] = second["candidate_transformer"]
+    top["second_transformer"] = (
+        second["candidate_transformer"]
+    )
+
     top["second_score"] = second["rank_score"]
 
     top["score_gap"] = (
@@ -339,7 +452,9 @@ def rankcandidates(frame, scores):
         - top["second_score"]
     )
 
-    top["top_score_tied"] = top["score_gap"].eq(0)
+    top["top_score_tied"] = (
+        top["score_gap"].eq(0)
+    )
 
     top["candidate_count"] = (
         ranked.groupby("meter_number").size()
@@ -354,32 +469,50 @@ def rankcandidates(frame, scores):
             ],
             kind="stable",
         )
-        .drop_duplicates("meter_number")
+        .drop_duplicates(
+            "meter_number",
+            keep="first",
+        )
         .set_index("meter_number")
     )
 
-    top["nearest_transformer"] = nearest["candidate_transformer"]
+    top["nearest_transformer"] = (
+        nearest["candidate_transformer"]
+    )
 
     return ranked, top
 
 
-def _evaluate(frame, scores):
-    ranked, top = rankcandidates(frame, scores)
+def _evaluate(
+    frame,
+    scores,
+):
+    ranked, top = rank_candidates(
+        frame,
+        scores,
+    )
 
     truth = (
-        ranked.loc[ranked["y"] == 1]
+        ranked.loc[
+            ranked["y"].eq(1)
+        ]
         .set_index("meter_number")
     )
 
-    top["verified_transformer"] = truth["candidate_transformer"]
-    top["truth_rank"] = truth["rank"]
-
-    top["correct"] = top["recommended_transformer"].eq(
-        top["verified_transformer"]
+    top["verified_transformer"] = (
+        truth["candidate_transformer"]
     )
 
-    top["nearest_correct"] = top["nearest_transformer"].eq(
-        top["verified_transformer"]
+    top["truth_rank"] = truth["rank"]
+
+    top["correct"] = (
+        top["recommended_transformer"]
+        .eq(top["verified_transformer"])
+    )
+
+    top["nearest_correct"] = (
+        top["nearest_transformer"]
+        .eq(top["verified_transformer"])
     )
 
     known = top["current_transformer"].notna()
@@ -410,25 +543,38 @@ def _evaluate(frame, scores):
     )
 
     def mean(values):
-        return float(values.mean()) if len(values) else None
+        if len(values):
+            return float(values.mean())
+
+        return None
 
     metrics = {
         "meters": len(top),
         "candidate_rows": len(frame),
-        "top1_accuracy": mean(top["correct"]),
-        "top3_recall": mean(top["truth_rank"].le(3)),
-        "mrr": mean(1.0 / top["truth_rank"]),
+        "top1_accuracy": mean(
+            top["correct"]
+        ),
+        "top3_recall": mean(
+            top["truth_rank"].le(3)
+        ),
+        "mrr": mean(
+            1.0 / top["truth_rank"]
+        ),
         "ndcg_at_3": float(
             np.where(
-                top["truth_rank"] <= 3,
-                1.0 / np.log2(top["truth_rank"] + 1),
+                top["truth_rank"].le(3),
+                1.0 / np.log2(
+                    top["truth_rank"] + 1
+                ),
                 0.0,
             ).mean()
         ),
         "nearest_baseline_accuracy": mean(
             top["nearest_correct"]
         ),
-        "current_assignment_coverage": mean(known),
+        "current_assignment_coverage": mean(
+            known
+        ),
         "current_baseline_accuracy_known": mean(
             current_correct[known]
         ),
@@ -436,13 +582,19 @@ def _evaluate(frame, scores):
             incorrect.sum()
         ),
         "top1_on_currently_incorrect": mean(
-            top.loc[incorrect, "correct"]
+            top.loc[
+                incorrect,
+                "correct",
+            ]
         ),
         "unassigned_meters": int(
             (~known).sum()
         ),
         "top1_on_unassigned": mean(
-            top.loc[~known, "correct"]
+            top.loc[
+                ~known,
+                "correct",
+            ]
         ),
         "proposed_changes": int(
             top["proposed_change"].sum()
@@ -484,9 +636,12 @@ def predict_transformers(
         )
     )
 
-    if frame["tx_current_transformer_count"].gt(
-        metadata["max_subgroup_transformers"]
-    ).any():
+    subgroup_limit_exceeded = (
+        frame["tx_current_transformer_count"]
+        .gt(metadata["max_subgroup_transformers"])
+    )
+
+    if subgroup_limit_exceeded.any():
         raise ValueError(
             "Prediction data contains subgroups above "
             "the training-quality limit"
@@ -495,21 +650,25 @@ def predict_transformers(
     model = xgb.XGBRanker()
     model.load_model(folder / "model.ubj")
 
+    encoded_frame = _encode(
+        frame,
+        metadata["feature_schema"],
+    )
+
     scores = model.predict(
-        encode(
-            frame,
-            metadata["featureschema"],
-        ),
+        encoded_frame,
         iteration_range=(
             0,
             metadata["best_iteration"] + 1,
         ),
     )
 
-    return rankcandidates(
+    _, top = rank_candidates(
         frame,
         scores,
-    )[1].reset_index()
+    )
+
+    return top.reset_index()
 
 
 def run_model_training_stage(
@@ -553,7 +712,10 @@ def run_model_training_stage(
         "reg_lambda": 5.0,
         "lambdarank_pair_method": "topk",
         "lambdarank_num_pair_per_sample": 8,
-        "eval_metric": ["ndcg@3", "ndcg@1"],
+        "eval_metric": [
+            "ndcg@3",
+            "ndcg@1",
+        ],
         "early_stopping_rounds": 75,
         "random_state": seed,
         "n_jobs": 4,
@@ -561,11 +723,13 @@ def run_model_training_stage(
 
     params.update(model_params or {})
 
-    if params["objective"] not in {
+    valid_objectives = {
         "rank:ndcg",
         "rank:pairwise",
         "rank:map",
-    }:
+    }
+
+    if params["objective"] not in valid_objectives:
         raise ValueError(
             "Use a ranking objective: "
             "rank:ndcg, rank:pairwise or rank:map"
@@ -573,30 +737,42 @@ def run_model_training_stage(
 
     patience = params["early_stopping_rounds"]
 
-    if not isinstance(patience, int) or patience < 1:
+    if (
+        not isinstance(patience, int)
+        or patience < 1
+    ):
         raise ValueError(
-            "early_stopping_rounds must be a positive integer"
+            "early_stopping_rounds must be "
+            "a positive integer"
         )
 
-    # Reuse today's model unless this file or training settings change.
+    # Reuse today's model unless this file or
+    # the training settings change.
     signature_settings = {
-        "training_directory": str(dataset.resolve()),
+        "training_directory": str(
+            dataset.resolve()
+        ),
         "parameters": params,
-        "exclude_features": sorted(exclude_features),
-        "max_subgroup_transformers": max_subgroup_transformers,
+        "exclude_features": sorted(
+            exclude_features
+        ),
+        "max_subgroup_transformers": (
+            max_subgroup_transformers
+        ),
         "xgboost_version": xgb.__version__,
         "pandas_version": pd.__version__,
     }
 
+    signature_payload = json.dumps(
+        signature_settings,
+        sort_keys=True,
+        allow_nan=False,
+    ).encode("utf-8")
+
     signature = hashlib.sha256(
         Path(__file__).read_bytes()
-        + json.dumps(
-            signature_settings,
-            sort_keys=True,
-            allow_nan=False,
-        ).encode("utf-8")
+        + signature_payload
     ).hexdigest()
-
 
     marker = output / "_complete.json"
 
@@ -610,14 +786,16 @@ def run_model_training_stage(
         "validation_predictions.parquet",
     ]
 
-    if (
+    reusable_model_exists = (
         not force_retrain
         and marker.exists()
         and all(
             (output / name).is_file()
             for name in required_outputs
         )
-    ):
+    )
+
+    if reusable_model_exists:
         try:
             completed = json.loads(
                 marker.read_text(
@@ -628,7 +806,8 @@ def run_model_training_stage(
             completed = {}
 
         if completed.get("signature") == signature:
-            # A later request for test evaluation reuses the same model.
+            # A later request for test evaluation
+            # reuses the same trained model.
             if evaluate_test:
                 metadata = json.loads(
                     (
@@ -638,19 +817,25 @@ def run_model_training_stage(
                     )
                 )
 
-                if (
+                test_predictions_path = (
+                    output
+                    / "test_predictions.parquet"
+                )
+
+                test_evaluation_missing = (
                     not metadata.get(
                         "test_evaluated",
                         False,
                     )
-                    or not (
-                        output / "test_predictions.parquet"
-                    ).exists()
-                ):
+                    or not test_predictions_path.exists()
+                )
+
+                if test_evaluation_missing:
                     frames = {
-                        name: validatesplit(
+                        name: validate_split(
                             pd.read_parquet(
-                                dataset / f"{name}.parquet"
+                                dataset
+                                / f"{name}.parquet"
                             ),
                             name,
                             max_subgroup_transformers,
@@ -662,7 +847,7 @@ def run_model_training_stage(
                         )
                     }
 
-                    checkoverlap(frames)
+                    check_overlap(frames)
 
                     model = xgb.XGBRanker()
                     model.load_model(
@@ -671,22 +856,31 @@ def run_model_training_stage(
 
                     test = frames["test"]
 
-                    test_metrics, predictions = _evaluate(
+                    encoded_test = _encode(
                         test,
-                        model.predict(
-                            _encode(
-                                test,
-                                metadata["feature_schema"],
-                            ),
-                            iteration_range=(
-                                0,
-                                metadata["best_iteration"] + 1,
-                            ),
+                        metadata["feature_schema"],
+                    )
+
+                    test_scores = model.predict(
+                        encoded_test,
+                        iteration_range=(
+                            0,
+                            metadata[
+                                "best_iteration"
+                            ]
+                            + 1,
                         ),
                     )
 
+                    test_metrics, predictions = (
+                        _evaluate(
+                            test,
+                            test_scores,
+                        )
+                    )
+
                     predictions.to_parquet(
-                        output / "test_predictions.parquet",
+                        test_predictions_path,
                         index=False,
                     )
 
@@ -701,11 +895,21 @@ def run_model_training_stage(
                     metrics["test"] = test_metrics
                     metadata["test_evaluated"] = True
 
-                    for filename, value in [
-                        ("metrics.json", metrics),
-                        ("metadata.json", metadata),
-                    ]:
-                        (output / filename).write_text(
+                    files_to_update = [
+                        (
+                            "metrics.json",
+                            metrics,
+                        ),
+                        (
+                            "metadata.json",
+                            metadata,
+                        ),
+                    ]
+
+                    for filename, value in files_to_update:
+                        (
+                            output / filename
+                        ).write_text(
                             json.dumps(
                                 value,
                                 indent=2,
@@ -715,7 +919,8 @@ def run_model_training_stage(
                         )
 
                     print(
-                        f"test: top1="
+                        "test: "
+                        f"top1="
                         f"{test_metrics['top1_accuracy']:.4f}"
                     )
 
@@ -730,7 +935,7 @@ def run_model_training_stage(
     )
 
     frames = {
-        name: validatesplit(
+        name: validate_split(
             pd.read_parquet(
                 dataset / f"{name}.parquet"
             ),
@@ -744,12 +949,12 @@ def run_model_training_stage(
         )
     }
 
-    split_counts = checkoverlap(frames)
+    split_counts = check_overlap(frames)
 
     train = frames["train"]
     validation = frames["validation"]
 
-    schema = featureschema(
+    schema = feature_schema(
         train,
         exclude_features,
     )
@@ -777,13 +982,20 @@ def run_model_training_stage(
         ],
     )
 
+    train_qid = pd.factorize(
+        train["qid"],
+        sort=False,
+    )[0]
+
+    validation_qid = pd.factorize(
+        validation["qid"],
+        sort=False,
+    )[0]
+
     model.fit(
         x_train,
         train["y"].to_numpy(),
-        qid=pd.factorize(
-            train["qid"],
-            sort=False,
-        )[0],
+        qid=train_qid,
         eval_set=[
             (
                 x_validation,
@@ -791,10 +1003,7 @@ def run_model_training_stage(
             )
         ],
         eval_qid=[
-            pd.factorize(
-                validation["qid"],
-                sort=False,
-            )[0]
+            validation_qid
         ],
         verbose=100,
     )
@@ -813,60 +1022,69 @@ def run_model_training_stage(
         exist_ok=True,
     )
 
-    # Only mark the run complete after every output is saved.
+    # Only mark the run complete after
+    # every required output is saved.
     marker.unlink(missing_ok=True)
 
     model.save_model(
         output / "model.ubj"
     )
 
-    # Remove an older test report if this replacement
-    # is not evaluating test.
+    # Remove an older test report if this
+    # replacement is not evaluating test.
     if not evaluate_test:
         (
             output / "test_predictions.parquet"
-        ).unlink(
-            missing_ok=True
-        )
+        ).unlink(missing_ok=True)
 
     metrics = {}
 
     evaluated_splits = (
-        ("train", "validation", "test")
+        (
+            "train",
+            "validation",
+            "test",
+        )
         if evaluate_test
-        else ("train", "validation")
+        else (
+            "train",
+            "validation",
+        )
     )
 
     for name in evaluated_splits:
         frame = frames[name]
 
-        matrix = (
-            x_train
-            if name == "train"
-            else x_validation
-            if name == "validation"
-            else _encode(
+        if name == "train":
+            matrix = x_train
+        elif name == "validation":
+            matrix = x_validation
+        else:
+            matrix = _encode(
                 frame,
                 schema,
             )
+
+        scores = model.predict(
+            matrix,
+            iteration_range=rounds,
         )
 
         metrics[name], predictions = _evaluate(
             frame,
-            model.predict(
-                matrix,
-                iteration_range=rounds,
-            ),
+            scores,
         )
 
         predictions.to_parquet(
-            output / f"{name}_predictions.parquet",
+            output
+            / f"{name}_predictions.parquet",
             index=False,
         )
 
         print(
             f"{name}: "
-            f"top1={metrics[name]['top1_accuracy']:.4f}; "
+            f"top1="
+            f"{metrics[name]['top1_accuracy']:.4f}; "
             f"nearest="
             f"{metrics[name]['nearest_baseline_accuracy']:.4f}; "
             f"change precision="
@@ -881,18 +1099,23 @@ def run_model_training_stage(
         {
             "feature": schema["encoded_features"],
             "gain": [
-                gain.get(c, 0.0)
-                for c in schema["encoded_features"]
+                gain.get(column, 0.0)
+                for column in schema[
+                    "encoded_features"
+                ]
             ],
         }
     )
 
-    importance.sort_values(
-        "gain",
-        ascending=False,
-    ).to_csv(
-        output / "feature_importance.csv",
-        index=False,
+    (
+        importance.sort_values(
+            "gain",
+            ascending=False,
+        )
+        .to_csv(
+            output / "feature_importance.csv",
+            index=False,
+        )
     )
 
     stopping_metric = params["eval_metric"]
@@ -902,9 +1125,13 @@ def run_model_training_stage(
 
     metadata = {
         "training_date": today,
-        "trained_at": datetime.now().isoformat(),
+        "trained_at": (
+            datetime.now().isoformat()
+        ),
         "training_signature": signature,
-        "training_directory": str(dataset.resolve()),
+        "training_directory": str(
+            dataset.resolve()
+        ),
         "xgboost_version": xgb.__version__,
         "pandas_version": pd.__version__,
         "best_iteration": best_iteration,
@@ -916,19 +1143,31 @@ def run_model_training_stage(
         "parameters": fit_params,
         "feature_schema": schema,
         "split_counts": split_counts,
-        "max_subgroup_transformers": max_subgroup_transformers,
+        "max_subgroup_transformers": (
+            max_subgroup_transformers
+        ),
         "test_evaluated": evaluate_test,
     }
 
-    for filename, value in [
-        ("metadata.json", metadata),
-        ("metrics.json", metrics),
+    output_payloads = [
+        (
+            "metadata.json",
+            metadata,
+        ),
+        (
+            "metrics.json",
+            metrics,
+        ),
         (
             "learning_curve.json",
             model.evals_result(),
         ),
-    ]:
-        (output / filename).write_text(
+    ]
+
+    for filename, value in output_payloads:
+        (
+            output / filename
+        ).write_text(
             json.dumps(
                 value,
                 indent=2,
@@ -939,15 +1178,20 @@ def run_model_training_stage(
 
     marker.write_text(
         json.dumps(
-            {"signature": signature},
+            {
+                "signature": signature,
+            },
             indent=2,
         ),
         encoding="utf-8",
     )
 
     print(
-        f"Saved {len(schema['encoded_features'])} encoded features, "
-        f"{best_iteration + 1} selected trees -> {output}"
+        f"Saved "
+        f"{len(schema['encoded_features'])} "
+        f"encoded features, "
+        f"{best_iteration + 1} selected trees "
+        f"-> {output}"
     )
 
     return output

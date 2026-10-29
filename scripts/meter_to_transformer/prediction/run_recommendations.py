@@ -1094,11 +1094,12 @@ def _fresh_features(
                     "Rebuild today's features."
                 )
 
+    # Match the division-specific population used to build features.
     customer_counts = (
-        ami.groupby("current_transformer")
-        .size()
+    ami.loc[ami["division"].eq(division)]
+    .groupby("current_transformer")["meter_number"]
+    .nunique()
     )
-
     if "customer_count" in frame:
         feature_customer_counts = pd.to_numeric(
             frame["customer_count"],
@@ -1936,6 +1937,7 @@ def run_recommendations_stage(
     final_feature_files,
     min_score_gap=0.0,
     min_division_sample=30,
+    include_previously_sent=False
 ):
     """Score new meters and export recommendation review files.
 
@@ -2131,10 +2133,28 @@ def run_recommendations_stage(
             )
 
             if saved_manifest != manifest:
-                raise ValueError(
-                    "Today's saved inputs or model changed. "
-                    "Existing predictions cannot be relabeled or "
-                    "rescored. Use the next day's fresh run."
+                changed = sorted(
+                    key
+                    for key in set(saved_manifest) | set(manifest)
+                    if saved_manifest.get(key) != manifest.get(key)
+                )
+
+                has_predictions = any(
+                    (today / "predictions").glob("*.parquet")
+                )
+
+                completed = (
+                    today / "_complete.json"
+                ).exists()
+
+                if has_predictions or completed:
+                    raise ValueError(
+                        f"Changed inputs: {changed}. "
+                        "Saved predictions exist; keep this run intact."
+                    )
+
+                print(
+                    f"Restarting an unscored run. Changed inputs: {changed}"
                 )
 
         manifest_path.write_text(
@@ -2353,8 +2373,9 @@ def run_recommendations_stage(
             # Exclude before calling the model. This includes every
             # historical, conflicting, or previously sent row.
             excluded_meters = (
-                predicted
-                | excluded_sent
+                predicted - excluded_sent
+                if include_previously_sent
+                else predicted | excluded_sent
             )
 
             features = features.loc[
@@ -2537,8 +2558,9 @@ def run_recommendations_stage(
             & scored["score_gap"].ge(
                 min_score_gap
             )
-            & ~scored["meter_number"].isin(
-                excluded_sent
+            & (
+                include_previously_sent
+                | ~scored["meter_number"].isin(excluded_sent)
             )
         ].copy()
 
