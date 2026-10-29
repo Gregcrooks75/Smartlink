@@ -667,6 +667,7 @@ def main():
         ami_transformer_col="current_meter_floc",
         subgroup_col="tx_group_id",
         quality_col="tx_current_transformer_count",
+        exclude_previous_recommendations=False
     )
 
     print(
@@ -698,7 +699,7 @@ def main():
     review_corrections(
         model_directory,
         training_directory,
-        target_precision=0.95,
+        target_precision=0.88,
         min_changes=100,
     )
 
@@ -723,12 +724,13 @@ def main():
 
     recommendation_directory = run_recommendations_stage(
         project_root=PROJECT_ROOT,
-        model_date="2026-10-22",      # Choose your saved model
+        model_date="2026-10-23",      # Choose your saved model
         min_score_gap=0.004216045,    # Bottom threshold in your screenshot
         ami_df=ami_df,
         full_ami_df=full_ami_df,
         transformer_df=full_transformer_df,
         final_feature_files=final_feature_outputs,
+        include_previously_sent=True
     )
 
 # ======================================================
